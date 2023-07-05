@@ -1,0 +1,27 @@
+{
+  "type": "LocNet",
+  "model_file": "./_train4/model_433.mdl",
+  "in_channels": 1,
+  "out_channels": 1,
+  "n_blocks": 2,
+  "start_filters": 8,
+  "activation": "relu",
+  "normalization": "None",
+  "conv_mode": "same",
+  "input_image_size": 64,
+  "dim": 3,
+  "train": {
+    "out_dir": "./_train4",
+    "current_epoch": 433,
+    "min_validation_loss": 10000000000.0,
+    "selected_model_epoch": 433,
+    "learning_rate": 0.02,
+    "max_num_of_epochs_per_run": 5,
+    "batch_size": 8,
+    "data_train_dir": "./sample_data/train",
+    "data_valid_dir": "./sample_data/valid",
+    "optimizer": "SGD",
+    "loss_func_train": "MSELoss",
+    "loss_func_valid": "L1Loss"
+  }
+}

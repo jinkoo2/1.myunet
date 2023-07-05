@@ -1,0 +1,31 @@
+{
+  "type": "UNet",
+  "model_file": "./_train3/model_233.mdl",
+  "in_channels": 1,
+  "out_channels": 1,
+  "n_blocks": 3,
+  "start_filters": 32,
+  "activation": "relu",
+  "normalization": "batch",
+  "conv_mode": "same",
+  "input_image_size": 64,
+  "input_image_spacing": 2.0,
+  "up_mode": "transposed",
+  "final_activation": "None",
+  "image_resample_background_pixel_value": -1000,
+  "dim": 3,
+  "train": {
+    "out_dir": "./_train3",
+    "current_epoch": 233,
+    "min_validation_loss": 10000000000.0,
+    "selected_model_epoch": 233,
+    "learning_rate": 0.01,
+    "max_num_of_epochs_per_run": 5,
+    "batch_size": 8,
+    "data_train_dir": "./sample_data/train",
+    "data_valid_dir": "./sample_data/valid",
+    "optimizer": "SGD",
+    "loss_func_train": "DiceLoss",
+    "loss_func_valid": "DiceLoss"
+  }
+}
