@@ -1,0 +1,17 @@
+ObjectType = Image
+NDims = 3
+BinaryData = True
+BinaryDataByteOrderMSB = False
+CompressedData = True
+CompressedDataSize = 155332
+TransformMatrix = 1 0 0 0 1 0 0 0 1
+Offset = -210.5 -210.5 -242.5
+CenterOfRotation = 0 0 0
+AnatomicalOrientation = RAI
+ElementSpacing = 0.82226600000000005 0.82226600000000005 2.5
+ITK_InputFilterName = MetaImageIO
+ITK_original_direction = 1 0 0 0 1 0 0 0 1
+ITK_original_spacing = 0.822266 2.5 2.5
+DimSize = 512 512 135
+ElementType = MET_UCHAR
+ElementDataFile = Eye_R.zraw

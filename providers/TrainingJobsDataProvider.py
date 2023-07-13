@@ -1,12 +1,11 @@
 import requests
 
-config={
-    'webservice_url': 'http://roweb3.uhmc.sbuh.stonybrook.edu:3000/api'
-}
+# this should be loaded from a config file
+from config import get_config
 
 class TrainingJobsDataProvider():
     
-    url = config['webservice_url']+'/trainingjobs'
+    url = get_config()['webservice_api_url']+'/trainingjobs'
 
     @staticmethod
     def get_all():
@@ -31,5 +30,11 @@ class TrainingJobsDataProvider():
         pass
 
     @staticmethod
-    def update(obj):
-        pass
+    def update(job):
+        #print(job)
+        url = TrainingJobsDataProvider.url+'/'+job['_id']
+        #print(url)
+        r = requests.put(url = url, json=job)
+        data = r.json()
+        return data
+    

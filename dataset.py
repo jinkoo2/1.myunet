@@ -1,7 +1,7 @@
 import torch
 from torch.utils.data import Dataset, DataLoader
 import numpy as np
-
+import os
 import SimpleITK as sitk
 from os import listdir, mkdir, makedirs
 from os.path import join, isfile, isdir, exists, split
@@ -590,3 +590,114 @@ class LocDataset2(Dataset):
 
     def __len__(self):
         return len(self.case_list)
+
+class LocDataset3(Dataset):
+    def __init__(self, input_list, downsample_grid_size=64, transform=None, sampled_image_out_dir=None, input_image_resample_background_pixel_value=-1000):
+        self.input_list = input_list
+        self.downsample_grid_size = downsample_grid_size
+        self.transform = transform
+        self.sampled_image_out_dir = sampled_image_out_dir
+        self.input_image_resample_background_pixel_value = input_image_resample_background_pixel_value
+
+        # # read the directoy
+        # self.image_dirname_list = [
+        #     item for item in filter(is_case_dir, listdir(dir))]
+
+        if self.sampled_image_out_dir:
+            if not exists(self.sampled_image_out_dir):
+                mkdir(self.sampled_image_out_dir)
+
+    def get_item(self, index):
+        # check if the index is valid?
+        case = self.input_list[index]
+        str_dir = os.path.dirname(case['structure_mhd'])
+        img_dir = os.path.dirname(case['image_mhd'])
+
+        # structure info
+        str_info_path = os.path.join(str_dir, 'img.info')
+        
+        # ct image
+        img_path = os.path.join(img_dir, 'img.mhd')
+
+        # print(img_path)
+        # print(str_info_path)
+
+        # read the bounding box of the rectum
+        dict = read_key_value_pairs(str_info_path)
+        bbox_w = [float(s) for s in dict['bbox'].split(',')]
+        minx, maxx, miny, maxy, minz, maxz = bbox_w
+        organ_rect_w = rect(low=[minx, miny, minz], high=[maxx, maxy, maxz])
+
+        # print('bbox_w=', bbox_w)
+        # print('organ_rect_w=', organ_rect_w)
+        # print('organ_rect_w.size()=', organ_rect_w.size())
+
+        # read the image
+        reader = sitk.ImageFileReader()
+        reader.SetImageIO("MetaImageIO")
+        reader.SetFileName(img_path)
+        img = reader.Execute()
+
+        # image bounding box
+        img_coord = image_coord(origin=img.GetOrigin(), size=img.GetSize(
+        ), spacing=img.GetSpacing(), direction=img.GetDirection())
+        # print('img_coord=', img_coord)
+        # print('img_coord.rect_o=', img_coord.rect_o())
+        # print('img_coord.rect_o.size()=', img_coord.rect_o().size())
+
+        # downsample the image to downsample_grid_size (ex, 64, 64, 64),
+        sample_grid_coord = image_coord(
+            origin=img.GetOrigin(),
+            size=[self.downsample_grid_size] * 3,
+            spacing=img_coord.rect_o().size(
+            )/np.array([self.downsample_grid_size] * 3),
+            direction=img_coord.direction
+        )
+
+        #print('sample_grid_coord', sample_grid_coord)
+
+        # resample image
+        sampled_image_path = f'{self.sampled_image_out_dir}/image_sampled_{index}.mhd' if self.sampled_image_out_dir else None
+        img_sampled = sample_image(
+            img_path, sample_grid_coord, 0, self.input_image_resample_background_pixel_value, sitk.sitkLinear, sampled_image_path)
+
+        # normalize the organ bounding box
+        organ_bbox_u = rect(low=img_coord.w2u(organ_rect_w.low),
+                            high=img_coord.w2u(organ_rect_w.high))
+        # print(organ_bbox_u)
+        center_u = (organ_bbox_u.low+organ_bbox_u.high)/np.array([2.0] * 3)
+        size_u = organ_bbox_u.size()
+
+        # print('organ_bbox_u=', organ_bbox_u)
+        # print('center_u=', center_u)
+        # print('size_u=', size_u)
+
+        # sitImage to Numpy
+        img_np = sitk.GetArrayFromImage(img_sampled).astype('float32')
+
+        # add color channel (1, because it's a gray, 1 color per pixel)
+        size = list(img_np.shape)
+        size.insert(0, 1)  # insert 1 to the 0th element
+        img_np.resize(size)
+
+        # sample
+        sample = img_np, np.concatenate(
+            (center_u, size_u), axis=0).astype('float32')
+
+        if self.transform:
+            sample = self.transform(sample)
+
+        # bbox to obect coordinate system
+        organ_bbox_o = rect(low=img_coord.w2o(organ_rect_w.low),
+                            high=img_coord.w2o(organ_rect_w.high))
+        # print(organ_bbox_u)
+
+        return sample, img_coord, organ_bbox_o
+
+    def __getitem__(self, index):
+        sample, _, _ = self.get_item(index)
+        return sample
+
+    def __len__(self):
+        return len(self.input_list)
+
