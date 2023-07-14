@@ -3,13 +3,9 @@ from param import param_from_txt
 from helper import s2f
 from rect import rect
 
-# this to be loaded from configuration file
-config={
-    'webservice_url': 'http://roweb3.uhmc.sbuh.stonybrook.edu:3000/api'
-}
-
-wm = WorkerManager2(config)
-wm.run()
+wm = WorkerManager2(wid='roweb3.workermanager.1')
+wm.run()    
+#wm.loop(sleep_sec=10)
 
 #rectum_locnet_worker = wm.create_worker("rectum_locnet_train4_202108")
 # # rectum_locnet_worker.train()

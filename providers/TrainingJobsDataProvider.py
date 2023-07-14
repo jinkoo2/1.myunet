@@ -14,6 +14,13 @@ class TrainingJobsDataProvider():
         return data
     
     @staticmethod
+    def get_jobs_not_completed():
+        r = requests.get(url = TrainingJobsDataProvider.url+'/not_completed')
+        data = r.json()
+        return data
+
+
+    @staticmethod
     def get_filtered(filter):
       pass
 
@@ -37,4 +44,13 @@ class TrainingJobsDataProvider():
         r = requests.put(url = url, json=job)
         data = r.json()
         return data
+    
+    # @staticmethod
+    # def update_properties(job_id, properties):
+    #     #print(job)
+    #     url = TrainingJobsDataProvider.url+'/'+job_id
+    #     #print(url)
+    #     r = requests.put(url = url, json=properties)
+    #     data = r.json()
+    #     return data
     

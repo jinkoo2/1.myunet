@@ -15,6 +15,10 @@ from image_coord import image_coord
 from dataset import sample_image
 from rect import rect
 import os
+import math
+from param import param_from_txt
+from helper import s2f
+
 
 from providers.StructuresDataProvider import StructuresDataProvider
 from providers.TrainingJobsDataProvider import TrainingJobsDataProvider
@@ -65,20 +69,22 @@ class LocNetWorker2():
         print(f'loading [{worker_file}]...')
         param = param_from_json(worker_file)
 
-        p = param['Parameters']
+        model = param['Model']
 
-        print(p)
+        print(model)
 
-        in_channels = p['in_channels']
-        out_channels = p['out_channels']
-        n_blocks = p['n_blocks']
-        start_filters = p['start_filters']
-        activation = str_to_None(p['activation'])
-        normalization = str_to_None(p['normalization'])
-        conv_mode = str_to_None(p['conv_mode'])
-        input_image_size = p['input_image_size']
-        dim = p['dim']
-        model_file = p['model_file'] if 'model_file' in p else ""
+        in_channels = model['in_channels']
+        out_channels = model['out_channels']
+        n_blocks = model['n_blocks']
+        start_filters = model['start_filters']
+        activation = str_to_None(model['activation'])
+        normalization = str_to_None(model['normalization'])
+        conv_mode = str_to_None(model['conv_mode'])
+        input_image_size = model['input_image_size']
+        dim = model['dim']
+        
+        train = param['Train']
+        model_file = train['model_file'] if 'model_file' in train else ""
 
         print('=== LocNet input parameters ====')
         print('in_channels=', in_channels)
@@ -102,7 +108,9 @@ class LocNetWorker2():
                         input_image_size=input_image_size,
                         dim=dim)
 
-        if model_file is not "" and exists(model_file):
+        current_epoch = train['current_epoch'] if 'current_epoch' in train else -1
+
+        if param['Status'] != 'New' and current_epoch >= 0 and model_file is not "" and exists(model_file):
             print(f'loading parameters from {model_file} ...')
             if torch.cuda.is_available():
                 print('CUDA is available')
@@ -112,19 +120,45 @@ class LocNetWorker2():
                 locnet.load_state_dict(torch.load(
                     model_file, map_location=torch.device('cpu')))
         else:
-            print(f'No model_file is availble.')
+            print(f'No model_file is loaded.')
 
         self.locnet = locnet
         self.worker_file = worker_file
         self.param = param
 
-    
+    def update_status(self, status):
+        
+        # update memory
+        self.param['Status'] = status
+        
+        # update db
+        TrainingJobsDataProvider.update({'_id': self.param['_id'], 'Status': status })
+        
+        print(f'Status chagned to "{status}"')
 
+    
+    def download_dataset(self,dataset_name):
+        print(f'--- downloading dataset {dataset_name} ---')
+        
+        files = []
+        for sid in self.param['DataSet'][dataset_name]:
+            downloaded_files = StructuresDataProvider.download_files(sid)
+            files.append(downloaded_files)
+
+        # check if all files available
+        for item in files:
+            if not mhd_image_files_exist(item['structure_mhd']):
+                raise Exception(f'Input image not found:{item["structure_mhd"]}')
+            if not mhd_image_files_exist(item['image_mhd']):
+                raise Exception(f'Input image not found:{item["image_mhd"]}')
+
+        return files
+    
     def train(self):
 
         print('torch.__version__=', torch.__version__)
 
-        train_p = self.param['Parameters']["train"]
+        train_p = self.param['Train']
 
         ############
         # parameters
@@ -132,56 +166,25 @@ class LocNetWorker2():
         max_num_of_epochs_per_run = train_p["max_num_of_epochs_per_run"]
         batch_size = train_p["batch_size"]
         out_dir = os.path.join(self.worker_dir, 'train')
-        #data_train_dir = train_p["data_train_dir"]
-        #data_valid_dir = train_p["data_valid_dir"]
-        network_input_image_size =  self.param['Parameters']["input_image_size"]
+        network_input_image_size =  self.param['Model']["input_image_size"]
         optimizer = train_p["optimizer"]
 
         #########
         # device
         device = self.device
 
+        ###############################
         # download data if not exists
-        print('--- downloading training set ---')
-        train_files = []
-        for sid in self.param['DataSet']['TrainSet']:
-            downloaded_files = StructuresDataProvider.download_files(sid)
-            train_files.append(downloaded_files)
-
-        valid_files = []
-        print('--- downloading validation set ---')
-        for sid in self.param['DataSet']['ValidSet']:
-            downloaded_files = StructuresDataProvider.download_files(sid)
-            valid_files.append(downloaded_files)
+        try:
+            train_files = self.download_dataset('TrainSet')
+            valid_files = self.download_dataset('ValidSet')
+        except Exception as e:
+            print('Error - File download failed!')
+            return 
 
         print(f'# of train images = {len(train_files)}')
         print(f'# of valid images = {len(valid_files)}')
-
-        # check if all files available
-        for item in train_files:
-            if not mhd_image_files_exist(item['structure_mhd']):
-                return "Input image not found!"
-            if not mhd_image_files_exist(item['image_mhd']):
-                return "Input image not found!"
-        
-        for item in valid_files:
-            if not mhd_image_files_exist(item['structure_mhd']):
-                return "Input image not found!"
-            if not mhd_image_files_exist(item['image_mhd']):
-                return "Input image not found!"
-        
-        print('All input files found!')
-
-        # # locnet needs only the structure files 
-        # train_structure_dir_list = [ os.path.dirname(item['structure_mhd']) for item in train_files]
-        # valid_structure_dir_list = [ os.path.dirname(item['structure_mhd']) for item in valid_files]
-
-        # print('sample train_structure_dir='+train_structure_dir_list[0])
-        # print('sample valid_structure_dir='+valid_structure_dir_list[0])
-
-        # print(f'# of train images = {len(train_structure_dir_list)}')
-        # print(f'# of valid images = {len(valid_structure_dir_list)}')
-
+      
         ###########
         # dataset
         train_ds = LocDataset3(input_list=train_files,
@@ -202,8 +205,15 @@ class LocNetWorker2():
         model = self.locnet
         model = model.to(device)
 
-        epoch0 = train_p["current_epoch"]
-        max_epoch = epoch0+max_num_of_epochs_per_run
+        if self.param['Status'] == 'New':
+            epoch0 = 0
+            max_epoch = max_num_of_epochs_per_run
+            epoch_list = []
+        else:
+            epoch_prev_run = train_p["current_epoch"]
+            epoch0 = epoch_prev_run + 1
+            max_epoch = epoch0 + max_num_of_epochs_per_run
+            epoch_list = train_p['epoch_list'] if 'epoch_list' in train_p else []
 
         print('epoch0=', epoch0)
         print('max_epoch=', max_epoch)
@@ -260,13 +270,19 @@ class LocNetWorker2():
             write_line(itr_epoch_file_path,
                        f'epoch, validation loss (L2), validation loss (L1), error_600(mm)')
 
-        n_steps_per_epoch = len(train_dlr)/batch_size
+        n_steps_per_epoch = math.floor(len(train_ds)/batch_size)+1
 
         print(f'len(train_dlr)={len(train_dlr)}')
         print(f'batch_size={batch_size}')
         print(f'n_steps_per_epoch (N/batch_size) ={n_steps_per_epoch}')
+     
 
-        for epoch in range(epoch0+1, max_epoch):
+        # update status
+        self.update_status("Training.Started")
+
+        for epoch in range(epoch0, max_epoch):
+            train_loss_list = []
+            loss_for_epoch = {}
             for i, (images, labels) in enumerate(train_dlr):
                 # for i in range(1):
                 #images, labels = train_itr.next()
@@ -294,7 +310,12 @@ class LocNetWorker2():
                 append_line(itr_file_path, f'{epoch}, {i}, {loss.item():.4f}')
 
                 print(
-                    f'Epoch [{epoch+1}/{max_num_of_epochs_per_run}], Step [{i+1}/{n_steps_per_epoch}], Loss: {loss.item():.4f}')
+                    f'Epoch [{epoch}/{max_epoch}], Step [{i}/{n_steps_per_epoch}], Loss: {loss.item():.4f}')
+                
+                # save train loss 
+                train_loss_list.append(loss.item())
+
+            loss_for_epoch['mean_train_loss_for_epoch'] = np.mean(np.array(train_loss_list))
 
             # calc mean loss over the validation dataset (each epoch save the validation loss)
             N_valid = len(valid_dlr)
@@ -319,7 +340,11 @@ class LocNetWorker2():
                 append_line(itr_epoch_file_path,
                             f'{epoch}, {mean_loss_L2.item():.4f}, {mean_loss_L1.item():.4f}, {error_600.item():.1f}')
                 print(
-                    f'Epoch [{epoch+1}/{max_num_of_epochs_per_run}], Mean Validation Loss L2: {mean_loss_L2.item():.4f}')
+                    f'Epoch [{epoch}/{max_epoch}], Mean Validation Loss L2: {mean_loss_L2.item():.4f}, Mean Validation Loss L1: {mean_loss_L1.item():.4f}')
+
+                loss_for_epoch['mean_valid_loss_L1'] = mean_loss_L1.item()
+                loss_for_epoch['mean_valid_loss_L2'] = mean_loss_L2.item()
+                loss_for_epoch['mean_valid_error_per_600mm'] = error_600.item()
 
                 # validation loss
                 validation_loss = mean_loss_L1.item()
@@ -328,30 +353,42 @@ class LocNetWorker2():
             if validation_loss < train_p["min_validation_loss"]:
 
                 # save the model
-                model_file = f'{out_dir}/model.mdl'
+                model_file = f'{out_dir}/model_{"{:05d}".format(epoch)}.mdl'
                 print('saving model'+model_file)
                 torch.save(model.state_dict(), model_file)
 
                 # save the current validation loss as minimum
                 train_p["min_validation_loss"] = validation_loss
                 train_p["selected_model_epoch"] = epoch
-                self.param["model_file"] = model_file
+                train_p["model_file"] = model_file
 
             # save the current epoch
             train_p["current_epoch"] = epoch
 
+            # epoch_list
+            epoch_list.append({
+                'epoch': epoch,
+                'loss': loss_for_epoch
+            })
+
+            train_p['epoch_list'] = epoch_list
+
             # update the param file
+            print('saving worker file: '+self.worker_file)
             self.param.save_to_json(self.worker_file)
 
             # update the job in db
+            print('updating db...')
             TrainingJobsDataProvider.update(self.param)
 
             # stop, if there is a stop.txt file
             stop_file = join(out_dir, 'stop.txt')
             if exists(stop_file):
                 print('stop.txt found! exiting training.')
-                break
+                self.update_status("Training.Stopped")
+                return 
 
+        self.update_status("Training.Finished")
         print('Finished Training')
 
     def locate(self, img_path):
@@ -369,7 +406,7 @@ class LocNetWorker2():
         print('img_coord.rect_o=', img_coord.rect_o())
         print('img_coord.rect_o.size()=', img_coord.rect_o().size())
 
-        W = self.param["input_image_size"]
+        W = self.param['Model']["input_image_size"]
         # downsample the image to downsample_grid_size (ex, 64, 64, 64),
         sample_grid_coord = image_coord(
             origin=img_coord.origin,
@@ -433,3 +470,46 @@ class LocNetWorker2():
             print('rect_w.size()=', rect_w.size())
 
         return rect_w, rect_o, rect_u
+
+    def test(self):
+
+        print('download test dataset')
+        try:
+            test_files = self.download_dataset('TestSet')
+        except Exception as e:
+            print('Error - File download failed!')
+            return 
+        
+        print(f'Test dataset N={len(test_files)}')
+
+        print(test_files[0])
+
+        err_mm_list = []
+        for item in test_files:
+            img_file = item['image_mhd']
+            str_file = item['structure_mhd']
+
+            rect_w_pred,_,_ = self.locate(img_file)
+            #print('rect_w_pred=',rect_w_pred)
+
+            # the true values
+            str_info = str_file.replace('.mhd', '.info')
+            bbox = s2f(param_from_txt(str_info)['bbox'].split(','))
+            rect_w_true = rect(low=[bbox[0], bbox[2], bbox[4]],
+                            high=[bbox[1], bbox[3], bbox[5]])
+            #print('rect_w_true=', rect_w_true)
+
+            rect_diff = rect(low=rect_w_pred.low - rect_w_true.low,
+                            high=rect_w_pred.high - rect_w_true.high)
+            print('rect_diff=', rect_diff)
+            err_mm = (np.linalg.norm(rect_diff.low)+np.linalg.norm(rect_diff.low))/2.0
+
+            print(f'error(mm)={err_mm})')
+            err_mm_list.append(err_mm)
+        
+        err_mean = np.mean(np.array(err_mm_list))
+
+        print(f'err_mean(mm)={err_mean}')
+        
+
+
