@@ -250,6 +250,108 @@ class SegDataset2(Dataset):
 
 # normalize CT value
 
+class SegDataset3(Dataset):
+    def __init__(self, input_list, grid_size, grid_spacing, samples_per_image, transform=None, sampled_image_out_dir=None, input_image_resample_background_pixel_value=-1000):
+        self.input_list = input_list
+        self.grid_size = grid_size
+        self.grid_spacing = grid_spacing
+
+        self.samples_per_image = samples_per_image
+        self.transform = transform
+        self.sampled_image_out_dir = sampled_image_out_dir
+
+        self.input_image_resample_background_pixel_value = input_image_resample_background_pixel_value
+
+        if self.sampled_image_out_dir:
+            if not exists(self.sampled_image_out_dir):
+                mkdir(self.sampled_image_out_dir)
+
+    def __getitem__(self, index):
+        img_index = int(index/self.samples_per_image)
+
+        # check if the index is valid?
+        case = self.input_list[img_index]
+        str_dir = os.path.dirname(case['structure_mhd'])
+        img_dir = os.path.dirname(case['image_mhd'])
+
+        # structure
+        str_path = join(str_dir, 'img.mhd')
+        str_info_path = os.path.join(str_dir, 'img.info')
+        
+        # ct image
+        img_path = os.path.join(img_dir, 'img.mhd')
+
+        # print('img_path=', img_path)
+        # print('str_path=', str_path)
+        # print('str_info_path=', str_info_path)
+
+        # read the bounding box of the rectum
+        dict = read_key_value_pairs(str_info_path)
+        bbox_w = [float(s) for s in dict['bbox'].split(',')]
+
+        # print(bbox)
+
+        minx, maxx, miny, maxy, minz, maxz = bbox_w
+
+        organ_rect_w = rect(low=[minx, miny, minz], high=[maxx, maxy, maxz])
+
+        # print('organ_bbox_o=', organ_bbox_o)
+
+        #u_min = np.array([0.0, 0.0, 0.0])
+        #u_max = np.array([1.0, 1.0, 1.0])
+        # a random point in unit space
+        #u = np.array([0.5, 0.5, 0.5])
+        u = np.random.rand(3)
+
+        # scale into bounding box, which will be the center of the sampling
+        grid_center_phy = organ_rect_w.low + u * organ_rect_w.size()
+        # print('grid_center=', grid_center_phy)
+
+        grid_size_phy = [self.grid_size * self.grid_spacing] * 3
+        # print('grid_size_phy=', grid_size_phy)
+
+        # pick a random point in the bounding box
+        grid_half_width = grid_size_phy * np.array([0.5, 0.5, 0.5])
+        # print('grid_half_width=', grid_half_width)
+        grid_org = grid_center_phy - grid_half_width
+        grid_high = grid_center_phy + grid_half_width
+        # print('grid_low=', grid_org)
+        # print('grid_high=', grid_high)
+
+        # sample the ct & rectum
+        grid_coord = image_coord(origin=grid_org, size=[
+                                 self.grid_size]*3, spacing=[self.grid_spacing]*3)
+
+        # print('grid_coord=', grid_coord)
+
+        img_sampled_image_path = f'{self.sampled_image_out_dir}/img_sampled_{index}.mhd' if self.sampled_image_out_dir else None
+        img_sampled = sample_image(
+            img_path, grid_coord, 3, self.input_image_resample_background_pixel_value, sitk.sitkLinear, img_sampled_image_path)
+
+        str_sampled_image_path = f'{self.sampled_image_out_dir}/str_sample_{index}.mhd' if self.sampled_image_out_dir else None
+        str_sampled = sample_image(
+            str_path, grid_coord, 3, 0, sitk.sitkNearestNeighbor, str_sampled_image_path)
+
+        # sitImage to Numpy
+        img_np = sitk.GetArrayFromImage(img_sampled).astype('float32')
+        str_np = sitk.GetArrayFromImage(str_sampled).astype('float32')
+
+        # add color channel (1, because it's a gray, 1 color per pixel)
+        size = list(img_np.shape)
+        size.insert(0, 1)  # insert 1 to the 0th element
+        img_np.resize(size)
+        str_np.resize(size)
+
+        sample = img_np, str_np
+
+        if self.transform:
+            sample = self.transform(sample)
+
+        return sample
+
+    def __len__(self):
+        return self.samples_per_image * len(self.input_list)
+
 
 def normalize(input):
     factor = 1.0/150.0

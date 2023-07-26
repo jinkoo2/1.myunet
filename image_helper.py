@@ -3,6 +3,7 @@ import SimpleITK as sitk
 import numpy as np
 from image_coord import image_coord
 from rect import rect
+import os
 
 def save_image(img, path):
     print(f'save_image(img, {path})')
@@ -177,3 +178,17 @@ def extract_largest_connected_compoment(binary_input_image):
                                       label_of_largest_object-0.5, label_of_largest_object+0.5, 0.0), sitk.sitkUInt8)
 
     return img_th
+
+def mhd_image_files_exist(mhd):
+        if not os.path.exists(mhd):
+            print('file not found:'+mhd)
+            return False
+        zraw = mhd.replace('.mhd', '.zraw')
+        if not os.path.exists(zraw):
+            print('file not found:'+zraw)
+            return False
+        info = mhd.replace('.mhd', '.info')
+        if not os.path.exists(info):
+            print('file not found:'+info)
+            return False
+        return True

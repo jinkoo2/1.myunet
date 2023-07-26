@@ -1,7 +1,7 @@
 from helper import read_key_value_pairs
 from os.path import join, exists
 from locnetworker2 import LocNetWorker2
-from unetworker import UNetWorker
+from unetworker2 import UNetWorker2
 from param import param_from_json
 from providers.TrainingJobsDataProvider import TrainingJobsDataProvider
 import os
@@ -61,10 +61,10 @@ class WorkerManager2():
             worker = self.create_worker(job_file)
 
             # train network
-            # worker.train()
+            worker.train()
 
             # run test set
-            worker.test()
+            # worker.test()
 
     def create_worker(self, worker_file):
 
@@ -82,7 +82,7 @@ class WorkerManager2():
         if type == 'LocNet3D':
             return LocNetWorker2(worker_file)
         elif type == 'UNet3D':
-            return UNetWorker(worker_file)
+            return UNetWorker2(worker_file)
         else:
             print(f'worker of type [{type}] not found!')
             return None

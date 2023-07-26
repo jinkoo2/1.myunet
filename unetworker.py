@@ -70,6 +70,8 @@ class UNetWorker():
         normalization = str_to_None(p['normalization'])
         conv_mode = str_to_None(p['conv_mode'])
         input_image_size = p['input_image_size']
+        input_image_spacing = p['input_image_spacing']
+
         dim = p['dim']
         up_mode = p['up_mode']
         final_activation = str_to_None(p['final_activation'])
@@ -121,6 +123,7 @@ class UNetWorker():
         print('torch.__version__=', torch.__version__)
 
         input_image_size = self.param["input_image_size"]
+        input_image_spacing = self.param["input_image_spacing"]
         train_p = self.param["train"]
 
         ############
@@ -153,7 +156,7 @@ class UNetWorker():
         # dataset
         train_ds = SegDataset1(dir=data_train_dir,
                                grid_size=input_image_size,
-                               grid_spacing=input_image_size,
+                               grid_spacing=input_image_spacing,
                                samples_per_image=1,
                                transform=NormalizeCT())
         train_dr = DataLoader(
@@ -161,7 +164,7 @@ class UNetWorker():
 
         valid_ds = SegDataset1(dir=data_train_dir,
                                grid_size=input_image_size,
-                               grid_spacing=input_image_size,
+                               grid_spacing=input_image_spacing,
                                samples_per_image=1,
                                transform=NormalizeCT())
         valid_dr = DataLoader(dataset=valid_ds, batch_size=1, shuffle=False)

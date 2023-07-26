@@ -9,6 +9,7 @@ from locnet import LocNet
 import datetime
 from image_coord import image_coord
 import urllib.request
+import os
 
 def to_str_array(arr):
     return [str(s) for s in arr]
@@ -274,4 +275,27 @@ def download(url, dest_file):
     urllib.request.urlretrieve(url, dest_file)
 
 
+def split_directory_path(path):
+    dir_names = []
+    while True:
+        path, folder = os.path.split(path)
+        if folder != "":
+            dir_names.append(folder)
+        else:
+            if path != "":
+                dir_names.append(path)
+            break
+
+    dir_names.reverse()
+    return dir_names
+
+import os
+import zipfile
+def zip_folder(source_folder, output_zip_filename):
+    with zipfile.ZipFile(output_zip_filename, 'w', zipfile.ZIP_DEFLATED) as zipf:
+        for root, _, files in os.walk(source_folder):
+            for file in files:
+                file_path = os.path.join(root, file)
+                relative_path = os.path.relpath(file_path, source_folder)
+                zipf.write(file_path, relative_path)
 

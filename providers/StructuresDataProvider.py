@@ -85,11 +85,18 @@ class StructuresDataProvider():
             StructuresDataProvider.download_file(src_url, dst_file)
         mhd = dst_file
 
+        # rename the binary datafile to 'img.zraw'
+        p = Param()
+        p.load_from_txt(mhd)
+        p["ElementDataFile"] = "img.zraw"
+        p.save_to_txt(mhd)
+        
         #zraw
         src_url = src_url.replace('.mhd', '.zraw')
         dst_file = dst_file.replace('.mhd', '.zraw')
         if not os.path.exists(dst_file):
             StructuresDataProvider.download_file(src_url, dst_file)
+
         #info
         src_url = src_url.replace('.zraw', '.info')
         dst_file = dst_file.replace('.zraw', '.info')

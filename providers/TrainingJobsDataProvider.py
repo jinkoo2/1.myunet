@@ -45,6 +45,22 @@ class TrainingJobsDataProvider():
         data = r.json()
         return data
     
+    @staticmethod
+    def upload_file(job_id, file_path):
+        #print('job_id=', job_id)
+        #print('file_path=', file_path)
+        url = TrainingJobsDataProvider.url+'/upload_file/'+job_id
+        #print(url)
+        
+        files = {'file': open(file_path, 'rb')}
+       
+        try:
+            response = requests.post(url = url, files=files)
+            if response.status_code != 200:
+                print(f"Error uploading file. Status code: {response.status_code}")
+        except requests.exceptions.RequestException as e:
+            print(f"Error: {e}")
+    
     # @staticmethod
     # def update_properties(job_id, properties):
     #     #print(job)

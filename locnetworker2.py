@@ -6,7 +6,7 @@ import numpy as np
 import torch.nn as nn
 from torchsummary import summary
 from torch.utils.data import DataLoader
-from helper import append_line, write_line
+from helper import append_line, write_line, zip_folder
 from os import mkdir, remove, write
 from os.path import join, exists
 from param import param_from_json
@@ -18,7 +18,9 @@ import os
 import math
 from param import param_from_txt
 from helper import s2f
+from image_helper import mhd_image_files_exist
 
+from train_helper import get_loss_function, get_optimizer
 
 from providers.StructuresDataProvider import StructuresDataProvider
 from providers.TrainingJobsDataProvider import TrainingJobsDataProvider
@@ -31,19 +33,6 @@ def str_to_None(str):
     else:
         return str
 
-def mhd_image_files_exist(mhd):
-        if not os.path.exists(mhd):
-            print('file not found:'+mhd)
-            return False
-        zraw = mhd.replace('.mhd', '.zraw')
-        if not os.path.exists(zraw):
-            print('file not found:'+zraw)
-            return False
-        info = mhd.replace('.mhd', '.info')
-        if not os.path.exists(info):
-            print('file not found:'+info)
-            return False
-        return True
 
 class LocNetWorker2():
 
@@ -154,6 +143,13 @@ class LocNetWorker2():
 
         return files
     
+    def zip_and_upload_tboard_logdir(self):
+        out_dir = os.path.join(self.worker_dir, 'train')
+        src = os.path.join(out_dir,'tboard')
+        dst = os.path.join(out_dir,'tboard.zip')
+        zip_folder(src, dst)
+        TrainingJobsDataProvider.upload_file(self.param['_id'], dst)
+
     def train(self):
 
         print('torch.__version__=', torch.__version__)
@@ -168,6 +164,14 @@ class LocNetWorker2():
         out_dir = os.path.join(self.worker_dir, 'train')
         network_input_image_size =  self.param['Model']["input_image_size"]
         optimizer = train_p["optimizer"]
+
+        ################
+        # tensorboard
+        tensorboard = True
+        if tensorboard:
+            from torch.utils.tensorboard import SummaryWriter
+            # default `log_dir` is "runs" - we'll be more specific here
+            tb_writer = SummaryWriter(os.path.join(out_dir,'tboard'))
 
         #########
         # device
@@ -209,6 +213,7 @@ class LocNetWorker2():
             epoch0 = 0
             max_epoch = max_num_of_epochs_per_run
             epoch_list = []
+            train_p['min_validation_loss'] = 100000000000000000000000.0
         else:
             epoch_prev_run = train_p["current_epoch"]
             epoch0 = epoch_prev_run + 1
@@ -226,22 +231,19 @@ class LocNetWorker2():
             out = model(x)
         summary(model, (1, W, W, W))
 
+        # ##################################
+        # # add model graph to tensorboard
+        # if tensorboard:
+        #     tb_writer.add_graph(model, torch.zeros(1, W, W, W))
+        #     self.zip_and_upload_tboard_logdir()
+
         ##############
         # train
 
         # training loss function
-        loss_func_train = None
-        if train_p["loss_func_train"] == 'MSELoss':
-            loss_func_train = nn.MSELoss()
-        else:
-            raise "Invalid loss_func_train:"+train_p["loss_func_train"]
-
-        # validation loss function
-        loss_func_valid = None
-        if train_p["loss_func_valid"] == 'L1Loss':
-            loss_func_valid = nn.L1Loss()
-        else:
-            raise "Invalid loss_func_valid:"+train_p["loss_func_valid"]
+        # loss functions
+        loss_func_train = get_loss_function(train_p["loss_func_train"])
+        loss_func_valid = get_loss_function(train_p["loss_func_valid"])
 
         # optimizer
         optimizer = None
@@ -276,9 +278,14 @@ class LocNetWorker2():
         print(f'batch_size={batch_size}')
         print(f'n_steps_per_epoch (N/batch_size) ={n_steps_per_epoch}')
      
-
         # update status
         self.update_status("Training.Started")
+
+
+
+
+
+        ###################################################
 
         for epoch in range(epoch0, max_epoch):
             train_loss_list = []
@@ -315,45 +322,45 @@ class LocNetWorker2():
                 # save train loss 
                 train_loss_list.append(loss.item())
 
-            loss_for_epoch['mean_train_loss_for_epoch'] = np.mean(np.array(train_loss_list))
+            loss_for_epoch['mean_train_loss'] = np.mean(np.array(train_loss_list))
 
             # calc mean loss over the validation dataset (each epoch save the validation loss)
             N_valid = len(valid_dlr)
             validation_loss = 1000000000000000000.0  # a random large number
+            loss_func_L1 = get_loss_function("L1Loss")
             with torch.no_grad():
+                sum_loss = 0.0
                 sum_loss_L1 = 0.0
-                sum_loss_L2 = 0.0
                 for i, (images, labels) in enumerate(valid_dlr):
                     # batch (size = 1 for validation)
                     images = images.to(device)
                     labels = labels.to(device)
                     outputs = model(images)
-                    loss_L2 = loss_func_train(outputs, labels)
-                    loss_L1 = loss_func_valid(outputs, labels)
-                    sum_loss_L2 += loss_L2
-                    sum_loss_L1 += loss_L1
-                mean_loss_L2 = sum_loss_L2/N_valid
+                    sum_loss += loss_func_valid(outputs, labels)
+                    sum_loss_L1 += loss_func_L1(outputs, labels)
+                mean_loss = sum_loss/N_valid
                 mean_loss_L1 = sum_loss_L1/N_valid
 
                 error_600 = mean_loss_L1 * 600.0  # assuming one side of the image is 600 mm
 
                 append_line(itr_epoch_file_path,
-                            f'{epoch}, {mean_loss_L2.item():.4f}, {mean_loss_L1.item():.4f}, {error_600.item():.1f}')
+                            f'{epoch}, {mean_loss.item():.4f}, {mean_loss_L1.item():.4f}, {error_600.item():.1f}')
                 print(
-                    f'Epoch [{epoch}/{max_epoch}], Mean Validation Loss L2: {mean_loss_L2.item():.4f}, Mean Validation Loss L1: {mean_loss_L1.item():.4f}')
+                    f'Epoch [{epoch}/{max_epoch}], Mean Validation Loss: {mean_loss.item():.4f}, Mean Validation Loss L1: {mean_loss_L1.item():.4f}')
 
+                loss_for_epoch['mean_valid_loss'] = mean_loss.item()
                 loss_for_epoch['mean_valid_loss_L1'] = mean_loss_L1.item()
-                loss_for_epoch['mean_valid_loss_L2'] = mean_loss_L2.item()
                 loss_for_epoch['mean_valid_error_per_600mm'] = error_600.item()
 
                 # validation loss
-                validation_loss = mean_loss_L1.item()
+                validation_loss = mean_loss.item()
 
             # if the validation is smallest, save the model
             if validation_loss < train_p["min_validation_loss"]:
 
                 # save the model
-                model_file = f'{out_dir}/model_{"{:05d}".format(epoch)}.mdl'
+                #model_file = f'{out_dir}/model_{"{:05d}".format(epoch)}.mdl'
+                model_file = f'{out_dir}/model.mdl'
                 print('saving model'+model_file)
                 torch.save(model.state_dict(), model_file)
 
@@ -361,6 +368,9 @@ class LocNetWorker2():
                 train_p["min_validation_loss"] = validation_loss
                 train_p["selected_model_epoch"] = epoch
                 train_p["model_file"] = model_file
+
+                # update the model_file
+                TrainingJobsDataProvider.upload_file(self.param['_id'], model_file)
 
             # save the current epoch
             train_p["current_epoch"] = epoch
@@ -370,6 +380,14 @@ class LocNetWorker2():
                 'epoch': epoch,
                 'loss': loss_for_epoch
             })
+
+            # tensorboard
+            if tensorboard:
+                print('writing tensorboard logs...')
+                tb_writer.add_scalar('train_loss', loss_for_epoch['mean_train_loss'], epoch)
+                tb_writer.add_scalar('valid_loss', loss_for_epoch['mean_valid_loss'], epoch)
+                print('zip & upload tensorboard logs...')
+                self.zip_and_upload_tboard_logdir()
 
             train_p['epoch_list'] = epoch_list
 
@@ -381,12 +399,21 @@ class LocNetWorker2():
             print('updating db...')
             TrainingJobsDataProvider.update(self.param)
 
+            # upload the itr files
+            print('uploading itr files...')
+            TrainingJobsDataProvider.upload_file(self.param['_id'], itr_epoch_file_path)
+            TrainingJobsDataProvider.upload_file(self.param['_id'], itr_file_path)
+
             # stop, if there is a stop.txt file
             stop_file = join(out_dir, 'stop.txt')
             if exists(stop_file):
                 print('stop.txt found! exiting training.')
                 self.update_status("Training.Stopped")
                 return 
+
+        # close tensorboard writer
+        if tensorboard:
+            tb_writer.close()
 
         self.update_status("Training.Finished")
         print('Finished Training')
